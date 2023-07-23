@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/twilio/twilio-go"
@@ -37,10 +38,7 @@ type Notification struct {
 		EndsAt       time.Time `json:"endsAt"`
 		GeneratorURL string    `json:"generatorURL"`
 	} `json:"alerts"`
-	GroupLabels struct {
-		Alertname string `json:"alertname"`
-		Job       string `json:"job"`
-	} `json:"groupLabels"`
+	GroupLabels  map[string]json.RawMessage `json:"groupLabels"`
 	CommonLabels struct {
 		Alertname string `json:"alertname"`
 		Dc        string `json:"dc"`
@@ -86,10 +84,11 @@ func postAlert(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		panic(err)
 	}
-	log.Printf("Alert name: %s is firing\n", notification.GroupLabels.Alertname)
+	alertName, _ := strconv.Unquote(string(notification.GroupLabels["alertname"]))
+	log.Printf("Alert name: %s is firing\n", alertName)
 
 	alert := Alert{
-		Name:     notification.CommonLabels.Alertname,
+		Name:     alertName,
 		Severity: "critical",
 	}
 	fmt.Println(alert)
@@ -160,7 +159,7 @@ func makeCall(message string, username string) error {
 	}
 	return fmt.Errorf("maximum number of retries reached")
 }
-func makePhoneCall(message string, phone string) error {
+func makePhoneCall(message *string, phone string) error {
 
 	clParams := twilio.ClientParams{
 		Username: os.Getenv("TWILLO_USER"),
@@ -290,34 +289,86 @@ func incidentWatcher(queue <-chan *incident) {
 	log.Println("[info] incidentWatcher started")
 	for inc := range queue {
 		log.Printf("[event] incidend event recived id: %s name: %s started: %s", inc.Id, inc.Name, inc.StartsAt)
+		go incidentNotifyer(inc)
+	}
+}
+
+func incidentNotifyer(incident *incident) {
+
+	for incident.Status == "new" {
+		tg_action := Action{
+			Channel: "telegram",
+			Time:    time.Now(),
+			Message: fmt.Sprintf("New Incident\n Name: %s\n Severity: %s", incident.Name, incident.Severity),
+		}
+
+		err := sendTelegramMessage(&tg_action.Message, -984782066)
+
+		if err != nil {
+			log.Println("[error] send tg message: ", err)
+		} else {
+			incident.Actions = append(incident.Actions, &tg_action)
+		}
+
+		phone_action := Action{
+			Channel: "phone",
+			Time:    time.Now(),
+			Message: "no message",
+		}
+
+		err = makePhoneCall(&tg_action.Message, "+79251893906")
+
+		if err != nil {
+			log.Println("[error] make a phone call ", err)
+		} else {
+			incident.Actions = append(incident.Actions, &phone_action)
+		}
+		time.Sleep(60 * time.Second)
 	}
 }
 
 func proccessingIncidents(incidents *incidentsState) {
-	for {
-		inc := incidents.Active
-		if inc != nil {
-			log.Printf("[info] have active incident %p is: %s status: %s alerts: %v", inc, inc.Name, inc.Status, inc.Alerts)
+	// for {
+	// 	inc := incidents.Active
+	// 	if inc != nil {
+	// 		log.Printf("[info] have active incident %p is: %s status: %s alerts: %v", inc, inc.Name, inc.Status, inc.Alerts)
 
-			if inc.Status == "new" {
-				tg_action := Action{
-					Channel: "telegram",
-					Time:    time.Now(),
-					Message: fmt.Sprintf("New Incident\n Name: %s\n Severity: %s", inc.Name, inc.Severity),
-				}
-				err := sendTelegramMessage(&tg_action.Message, -984782066)
-				if err != nil {
-					log.Println("[error] cannot process message: ", err)
-				} else {
-					inc.Actions = append(inc.Actions, &tg_action)
-				}
-			}
+	// 		if inc.Status == "new" {
 
-		} else {
-			log.Println("[info] no active incident")
-		}
-		time.Sleep(5 * time.Second)
-	}
+	// 			tg_action := Action{
+	// 				Channel: "telegram",
+	// 				Time:    time.Now(),
+	// 				Message: fmt.Sprintf("New Incident\n Name: %s\n Severity: %s", inc.Name, inc.Severity),
+	// 			}
+
+	// 			err := sendTelegramMessage(&tg_action.Message, -984782066)
+
+	// 			if err != nil {
+	// 				log.Println("[error] send tg message: ", err)
+	// 			} else {
+	// 				inc.Actions = append(inc.Actions, &tg_action)
+	// 			}
+
+	// 			phone_action := Action{
+	// 				Channel: "phone",
+	// 				Time:    time.Now(),
+	// 				Message: "no message",
+	// 			}
+
+	// 			err = makePhoneCall(&tg_action.Message, "+79251893906")
+
+	// 			if err != nil {
+	// 				log.Println("[error] make a phone call ", err)
+	// 			} else {
+	// 				inc.Actions = append(inc.Actions, &phone_action)
+	// 			}
+	// 		}
+
+	// 	} else {
+	// 		log.Println("[info] no active incident")
+	// 	}
+	// 	time.Sleep(60 * time.Second)
+	// }
 }
 
 func proccessingMessages(incidents *incidentsState, queue <-chan Alert) {
@@ -353,7 +404,7 @@ func main() {
 	alertQueue := make(chan Alert, 3)
 	go proccessingMessages(&incidents, alertQueue)
 	go incidentWatcher(incidents.EventsQueue)
-	go proccessingIncidents(&incidents)
+	//go proccessingIncidents(&incidents)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		ctx := context.WithValue(r.Context(), incidentsStateKey, &incidents)
 		getRoot(w, r.WithContext(ctx))
