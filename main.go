@@ -192,23 +192,32 @@ func makePhoneCall(message *string, phone string) error {
 }
 
 type telegramMessage struct {
-	ChatId int64  `json:"chat_id"`
-	Text   string `json:"text"`
+	ChatId    int64  `json:"chat_id"`
+	Text      string `json:"text"`
+	ParseMode string `json:"parse_mode"`
 }
 
 func sendTelegramMessage(message *string, chatid int64) error {
 	tgMessage := telegramMessage{
-		ChatId: chatid,
-		Text:   *message,
+		ChatId:    chatid,
+		ParseMode: "HTML",
+		Text:      *message,
 	}
 	tgBotToken := os.Getenv("TG_BOT_TOKEN")
 	url := "https://api.telegram.org/bot" + tgBotToken + "/sendMessage"
-	payload, err := json.Marshal(tgMessage)
+	buf := &bytes.Buffer{}
+	enc := json.NewEncoder(buf)
+	enc.SetEscapeHTML(false)
+	err := enc.Encode(tgMessage)
+
 	if err != nil {
 		log.Println("[error] cannot marshal tg message ", err)
 		return err
 	}
+	payload := buf.Bytes()
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(payload))
+	log.Printf("[debug] tg payload: %s", payload)
+	log.Printf("[debug] body: %s", resp.Body)
 	if err != nil {
 		log.Println("[error] ", err)
 		return err
@@ -294,14 +303,14 @@ func incidentWatcher(queue <-chan *incident) {
 }
 
 func incidentNotifyer(incident *incident) {
-
+	srvUrl := os.Getenv("SRV_URL")
 	for incident.Status == "new" {
 		tg_action := Action{
 			Channel: "telegram",
 			Time:    time.Now(),
-			Message: fmt.Sprintf("New Incident\n Name: %s\n Severity: %s", incident.Name, incident.Severity),
+			Message: fmt.Sprintf("New Incident\n Name: %s\n Severity: %s\n <a href=\"%s\">%s</a>", incident.Name, incident.Severity, srvUrl, srvUrl),
 		}
-
+		log.Printf("[debug] send message: %s", tg_action.Message)
 		err := sendTelegramMessage(&tg_action.Message, -984782066)
 
 		if err != nil {
