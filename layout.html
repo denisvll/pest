@@ -1,0 +1,70 @@
+<h1>incidents</h1>
+
+
+<h2>---Active---</h2>
+{{if .Active }}
+Name: {{ .Active.Name }} <br>
+Status: {{ .Active.Status }} | <a href="/ack?Id={{.Active.Id}}">Tap to Acknowledge</a> | <a href="/close?Id={{.Active.Id}}">Tap to Close</a><br> 
+Started: {{ .Active.StartsAt }}<br>
+Severity: {{ .Active.Severity }}<br>
+Alerts:<br>
+<table>
+        <thead>
+            <tr>
+                <th>Alert Name</th>
+                <th>Severity</th>
+            </tr>
+        </thead>
+        {{ range .Active.Alerts }}
+            <tr>
+                <td>{{.Name}}</td>
+                <td>{{.Severity}}</td>
+            </tr>
+        {{ end }}
+</table>
+Actions:<br>
+<table>
+        <thead>
+            <tr>
+                <th>Channel</th>
+                <th>Time</th>
+                <th>Message</th>
+            </tr>
+        </thead>
+        {{ range .Active.Actions }}
+            <tr>
+                <td>{{.Channel}}</td>
+                <td>{{.Time}}</td>
+                <td>{{.Message}}</td>
+            </tr>
+        {{ end }}
+</table>
+
+{{end}}
+<h2>---History---</h2>
+{{range .List}}
+
+    Name: {{ .Name }} <br>
+    Status: {{ .Status }}<br>
+    Started: {{ .StartsAt }}<br>
+    Ended: {{ .EndsAt }}<br>
+    Severity: {{ .Severity }}<br>
+    Alerts:<br>
+    <table>
+        <thead>
+            <tr>
+                <th>Alert Name</th>
+                <th>Severity</th>
+            </tr>
+        </thead>
+        <tbody>
+        {{ range .Alerts }}
+            <tr>
+                <td>{{.Name}}</td>
+                <td>{{.Severity}}</td>
+            </tr>
+        {{ end }}
+        </tbody>
+</table>
+    <h3>-------------</h3>
+{{end}}
