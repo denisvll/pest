@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"io/ioutil"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
@@ -58,23 +58,67 @@ type Alert struct {
 	Severity string
 }
 
+type incident struct {
+	Id       string
+	Name     string
+	Status   string
+	StartsAt time.Time
+	EndsAt   time.Time
+	Severity string
+	Alerts   []Alert
+	Actions  []*Action
+}
+
+type Action struct {
+	Channel string
+	Time    time.Time
+	Message string
+}
+
+type incidentsState struct {
+	Active      *incident
+	List        []*incident
+	EventsQueue chan *incident
+}
+
+type telegramMessage struct {
+	ChatId    int64  `json:"chat_id"`
+	Text      string `json:"text"`
+	ParseMode string `json:"parse_mode"`
+}
+
+type ctxKey int
+
+const (
+	messageQueueKey   ctxKey        = 0
+	incidentsStateKey ctxKey        = 1
+	maxRetries        int           = 3
+	retryInterval     time.Duration = 5 * time.Second
+)
+
 func getRoot(w http.ResponseWriter, r *http.Request) {
+
 	incidents := r.Context().Value(incidentsStateKey).(*incidentsState)
 	tmpl := template.Must(template.ParseFiles("layout.html"))
+
 	log.Printf("[debug] / active incident (%T)-(%p): %v", incidents.Active, incidents.Active, incidents.Active)
+
 	for _, inc := range incidents.List {
 		fmt.Printf("Name: %s, Alerts: %v", inc.Name, inc.Alerts)
 	}
+
 	tmpl.Execute(w, incidents)
 }
+
 func postAlert(w http.ResponseWriter, r *http.Request) {
 
 	queue := r.Context().Value(messageQueueKey).(chan Alert)
 
-	fmt.Printf("got / request\n")
-	body, err := ioutil.ReadAll(r.Body)
+	log.Printf("[info] got / request")
+
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		fmt.Printf("could not read body: %s\n", err)
+		log.Printf("[error] could not read body: %s\n", err)
 	}
 	defer r.Body.Close()
 
@@ -85,7 +129,7 @@ func postAlert(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 	alertName, _ := strconv.Unquote(string(notification.GroupLabels["alertname"]))
-	log.Printf("Alert name: %s is firing\n", alertName)
+	log.Printf("[info] Alert name: %s is firing\n", alertName)
 
 	alert := Alert{
 		Name:     alertName,
@@ -101,6 +145,7 @@ func postAlert(w http.ResponseWriter, r *http.Request) {
 }
 
 func getAck(w http.ResponseWriter, r *http.Request) {
+
 	incidents := r.Context().Value(incidentsStateKey).(*incidentsState)
 
 	log.Println("[info] got /ack")
@@ -112,9 +157,11 @@ func getAck(w http.ResponseWriter, r *http.Request) {
 }
 
 func getClose(w http.ResponseWriter, r *http.Request) {
+
 	incidents := r.Context().Value(incidentsStateKey).(*incidentsState)
 
 	log.Println("[info] got /close")
+
 	if incidents.Active != nil {
 		log.Printf("[info] /close active incident (%T)-(%p): %s", incidents, incidents, incidents.Active.Name)
 		incidents.closeActive(incidents.Active.Id)
@@ -122,14 +169,8 @@ func getClose(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 }
 
-const (
-	messageQueueKey   int           = 0
-	incidentsStateKey int           = 1
-	maxRetries        int           = 3
-	retryInterval     time.Duration = 5 * time.Second
-)
+func makeTgCall(message string, username string) error {
 
-func makeCall(message string, username string) error {
 	boturl, _ := url.Parse("http://api.callmebot.com/start.php")
 	params := url.Values{}
 	params.Add("source", "openHAB")
@@ -159,6 +200,7 @@ func makeCall(message string, username string) error {
 	}
 	return fmt.Errorf("maximum number of retries reached")
 }
+
 func makePhoneCall(message *string, phone string) error {
 
 	clParams := twilio.ClientParams{
@@ -189,12 +231,6 @@ func makePhoneCall(message *string, phone string) error {
 		}
 	}
 	return fmt.Errorf("maximum number of retries reached")
-}
-
-type telegramMessage struct {
-	ChatId    int64  `json:"chat_id"`
-	Text      string `json:"text"`
-	ParseMode string `json:"parse_mode"`
 }
 
 func sendTelegramMessage(message *string, chatid int64) error {
@@ -234,29 +270,6 @@ func sendTelegramMessage(message *string, chatid int64) error {
 
 }
 
-type incident struct {
-	Id       string
-	Name     string
-	Status   string
-	StartsAt time.Time
-	EndsAt   time.Time
-	Severity string
-	Alerts   []Alert
-	Actions  []*Action
-}
-
-type Action struct {
-	Channel string
-	Time    time.Time
-	Message string
-}
-
-type incidentsState struct {
-	Active      *incident
-	List        []*incident
-	EventsQueue chan *incident
-}
-
 func (i *incidentsState) createNew(name string, severity string) {
 	randomInt := rand.Uint64()
 
@@ -277,7 +290,7 @@ func (i *incidentsState) createNew(name string, severity string) {
 
 func (i *incidentsState) ackActive(id string) error {
 	if i.Active.Id != id {
-		return errors.New(fmt.Sprintf("id of active incedent: %s, ack for id recived is: %s", i.Active.Id, id))
+		return fmt.Errorf("id of active incedent: %s, ack for id recived is: %s", i.Active.Id, id)
 	}
 	log.Printf("[debug] going to ack inc: (%T-%p) in a state: (%T-%p)", i.Active, i.Active, i, i)
 	i.Active.Status = "ack"
@@ -286,7 +299,7 @@ func (i *incidentsState) ackActive(id string) error {
 
 func (i *incidentsState) closeActive(id string) error {
 	if i.Active.Id != id {
-		return errors.New(fmt.Sprintf("id of active incedent: %s, close for id recived is: %s", i.Active.Id, id))
+		return fmt.Errorf("id of active incedent: %s, close for id recived is: %s", i.Active.Id, id)
 	}
 	i.Active.Status = "closed"
 	i.Active.EndsAt = time.Now()
@@ -334,50 +347,6 @@ func incidentNotifyer(incident *incident) {
 		}
 		time.Sleep(60 * time.Second)
 	}
-}
-
-func proccessingIncidents(incidents *incidentsState) {
-	// for {
-	// 	inc := incidents.Active
-	// 	if inc != nil {
-	// 		log.Printf("[info] have active incident %p is: %s status: %s alerts: %v", inc, inc.Name, inc.Status, inc.Alerts)
-
-	// 		if inc.Status == "new" {
-
-	// 			tg_action := Action{
-	// 				Channel: "telegram",
-	// 				Time:    time.Now(),
-	// 				Message: fmt.Sprintf("New Incident\n Name: %s\n Severity: %s", inc.Name, inc.Severity),
-	// 			}
-
-	// 			err := sendTelegramMessage(&tg_action.Message, -984782066)
-
-	// 			if err != nil {
-	// 				log.Println("[error] send tg message: ", err)
-	// 			} else {
-	// 				inc.Actions = append(inc.Actions, &tg_action)
-	// 			}
-
-	// 			phone_action := Action{
-	// 				Channel: "phone",
-	// 				Time:    time.Now(),
-	// 				Message: "no message",
-	// 			}
-
-	// 			err = makePhoneCall(&tg_action.Message, "+79251893906")
-
-	// 			if err != nil {
-	// 				log.Println("[error] make a phone call ", err)
-	// 			} else {
-	// 				inc.Actions = append(inc.Actions, &phone_action)
-	// 			}
-	// 		}
-
-	// 	} else {
-	// 		log.Println("[info] no active incident")
-	// 	}
-	// 	time.Sleep(60 * time.Second)
-	// }
 }
 
 func proccessingMessages(incidents *incidentsState, queue <-chan Alert) {

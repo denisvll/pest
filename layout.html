@@ -1,14 +1,95 @@
-<h1>incidents</h1>
+<html>
+<head>
+<style>
+
+html {
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: larger;
+}
+
+p.solid {
+    border-style: solid;
+    border-color: red;
+
+    }
+p.history {
+    border-bottom: solid rgb(212, 212, 212) 4px;
+}
+
+#table {
+    border-collapse: collapse;
+}
+#table-info {
+    border-collapse: collapse;
+}
+
+#table-info td, #table-info th {
+  border: 1px solid #ddd;
+  padding: 8px;
+  background-color: #f2f2f2;
+}
+
+#table td, #table th {
+  border: 1px solid #ddd;
+  padding: 8px;
+  background-color: #f2f2f2;
+}
+
+#table th {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  text-align: left;
+  background-color: #ddd;
+  color: rgb(0, 0, 0);
+}
+.highlight{
+    display: inline-block;
+    padding: .25em 0;
+    background: #fdbe03;
+    color: #000000;
+    font-style:oblique;
+}
+
+.button {
+  background-color: #8ef5aa; /* Green */
+  border: none;
+  color: white;
+  padding: .25em 32px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  font-size: 16px;
+  margin: 4px 2px;
+  cursor: pointer;
+}
 
 
-<h2>---Active---</h2>
+</style>
+</head>
+<body>
+
+<h2>Active</h2>
+
 {{if .Active }}
-Name: {{ .Active.Name }} <br>
-Status: {{ .Active.Status }} | <a href="/ack?Id={{.Active.Id}}">Tap to Acknowledge</a> | <a href="/close?Id={{.Active.Id}}">Tap to Close</a><br> 
-Started: {{ .Active.StartsAt }}<br>
-Severity: {{ .Active.Severity }}<br>
+<p class="solid"> 
+<table id="table-info">
+<tr>
+<td>Name:</td> <td> {{ .Active.Name }} </td>
+</tr>
+<tr>
+<td>Status: </td><td><span class="highlight">{{.Active.Status}} </span> <button class="button"><a href="/ack?Id={{.Active.Id}}">Tap to Acknowledge</a>  </button>
+    <button class="button"> <a href="/close?Id={{.Active.Id}}">Tap to Close</a> </button></td>
+</tr>
+<tr>
+<td>Started: </td><td>{{ .Active.StartsAt.Format "02 Jan 06 15:04 MST" }}</td>
+</tr>
+<tr>
+<td>Severity:</td> <td>{{ .Active.Severity }}</td>
+</tr>
+</table>
+<br>
 Alerts:<br>
-<table>
+<table id="table">
         <thead>
             <tr>
                 <th>Alert Name</th>
@@ -22,8 +103,9 @@ Alerts:<br>
             </tr>
         {{ end }}
 </table>
+<br>
 Actions:<br>
-<table>
+<table id="table">
         <thead>
             <tr>
                 <th>Channel</th>
@@ -34,23 +116,38 @@ Actions:<br>
         {{ range .Active.Actions }}
             <tr>
                 <td>{{.Channel}}</td>
-                <td>{{.Time}}</td>
+                <td>{{.Time.Format "02 Jan 06 15:04 MST"}}</td>
                 <td>{{.Message}}</td>
             </tr>
         {{ end }}
 </table>
-
+</p>
 {{end}}
-<h2>---History---</h2>
-{{range .List}}
 
-    Name: {{ .Name }} <br>
-    Status: {{ .Status }}<br>
-    Started: {{ .StartsAt }}<br>
-    Ended: {{ .EndsAt }}<br>
-    Severity: {{ .Severity }}<br>
+<h2>History</h2>
+{{range .List}}
+<p class="history">
+    <table id="table-info">
+        <tr>
+        <td>Name:</td> <td> {{ .Name }} </td>
+        </tr>
+        <tr>
+        <td>Status:</td> <td>  {{ .Status }} </td>
+    </tr>
+    <tr>
+        <td>Started:</td> <td> {{ .StartsAt.Format "02 Jan 06 15:04 MST" }}</td>
+    </tr>
+    <tr>
+        <td>Ended: </td> <td>{{ .EndsAt.Format "02 Jan 06 15:04 MST" }}</td>
+    </tr>
+    <tr>
+        <td>Severity: </td> <td>{{ .Severity }}</td>
+    </tr>
+    </table>
+
+    <br>
     Alerts:<br>
-    <table>
+    <table id="table">
         <thead>
             <tr>
                 <th>Alert Name</th>
@@ -66,5 +163,8 @@ Actions:<br>
         {{ end }}
         </tbody>
 </table>
-    <h3>-------------</h3>
+<br>
+</p>
 {{end}}
+</body>
+</html>
